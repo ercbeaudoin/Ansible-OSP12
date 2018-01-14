@@ -1,0 +1,7 @@
+# Image
+image_path: /var/lib/libvirt/images/
+image_rhel7_guest: 'rhel74-guest.qcow2'
+image_rhel7_orign: "rhel-guest-image-7.4-263.x86_64.qcow2"
+image_size: 596013568
+image_full_path: /var/lib/libvirt/images/rhel74-guest.qcow2
+rhel_guest_url: "http://download-node-02.eng.bos.redhat.com/brewroot/packages/rhel-guest-image/7.4/268/images/rhel-guest-image-7.4-268.x86_64.qcow2"

@@ -1,0 +1,40 @@
+#Stack user/passwd
+stack_user:
+  name: stack
+  passwd: Redhat01
+
+  #Undercloud
+undercloud:
+  name: osp12-undercloud
+  passwd: Redhat01
+  image_size: 1168769024
+  cpu: 4
+  mem: 16384
+  virt_type: kvm
+  virt_hypervisor: hvm
+  swap_file: /swap4G.swap
+  #  swap_file: 4G
+  os:
+    type: linux
+    variant: rhel7
+  disk:
+    path: /var/lib/libvirt/images
+    size: 100
+  static_default_net:
+    ip: 192.168.122.253
+    ntmk: 255.255.255.0
+    gtw: 192.168.122.1
+    dns1: 192.168.122.1
+  static_external_net:
+    ip: 192.168.41.253
+    ntmk: 255.255.255.0
+    gtw: 192.168.41.1
+    dns1: 192.168.41.1
+#Libvirt Network
+net: 
+  default: 
+    name: default
+    test: 1
+  brctlplane: 
+    name: "brctlplane"
+

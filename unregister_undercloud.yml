@@ -1,0 +1,10 @@
+---
+- hosts: osp12-undercloud
+  gather_facts: False
+  tasks:
+    - name: Unregister undercloud server
+      redhat_subscription:
+        state: absent
+  become: yes
+  become_user: root
+

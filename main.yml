@@ -1,0 +1,24 @@
+---
+- name: Setup the network and create undercloud/overcloud nodes (VMs)
+  hosts: hypervisor
+  roles:
+    - r1_setupNetwork
+    - r2_createVMs
+  become: yes
+
+#- name: Register the undercloud
+#hosts: osp10-undercloud
+#  roles:
+#    - r2_registerundercloud
+#  become: yes
+#  become_user: root
+
+#- name: Configure the undercloud
+#  hosts: osp10-undercloud
+#  remote_user: stack
+#  roles:
+#    - r3_deploy_undercloud 
+#    - r4_configureovercloud
+#    - r5_deploy_overcloud
+
+

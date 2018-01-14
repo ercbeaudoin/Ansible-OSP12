@@ -1,0 +1,56 @@
+---
+# Get the Virtual netowrk list
+- name: get list of vms
+  virt_net: command=list_nets
+  register: virt_net_list
+
+- debug: var=net
+- debug: var=net.default
+- debug: var=net.default.name
+# Verify if default network has DHCP enable
+## Disable DHCP if enable
+- name: Get default network details
+  virt_net: command=get_xml name=default
+  register: default_xml
+  when: net.default.name in virt_net_list.list_nets
+
+  #- name: Destroy default network if DHCP enable
+  #  virt_net: name=default state=absent
+  #  when: (default_xml is defined) and ("{{ net.default.name }}" in "{{ virt_net_list.list_nets }}") and ("DHCP" in "{{ default_xml.get_xml }}")
+
+
+####### Default virtual network ########
+
+- name: Create the default network if does not exist
+  virt_net: command=define name={{ net.default.name }} autostart=yes xml='{{ lookup("template", "net_default_nodhcp_file.xml.j2") }}'
+  when: (default_xml is defined) and ((net.default.name not in virt_net_list.list_nets))
+  #  when: (default_xml is defined) and (("{{ net.default.name }}" not in "{{ virt_net_list.list_nets }}"))
+
+- name: Ensure that a network is active
+  virt_net: state=active name={{ net.default.name }}
+
+# Ensure that Default network will be started at boot
+- virt_net: autostart=yes name={{ net.default.name }}
+
+####### Provisioning virtual network ####
+
+- name: Create the brctlplane network if does not exist
+  virt_net: command=define name={{ net.brctlplane.name }} autostart=yes xml='{{ lookup("template", "{{ net.brctlplane.name }}.xml.j2") }}' 
+  when: net.brctlplane.name not in virt_net_list.list_nets
+
+- name: Ensure that a network is active
+  virt_net: state=active name={{ net.brctlplane.name }}
+
+# Ensure that brctlplane network will be started at boot
+- virt_net: autostart=yes name={{ net.brctlplane.name }}
+
+
+# Verify is stack has the permission access libvirt and virsh
+- name: Verify /etc/polkit-1/localauthority/50-local.d/50-libvirt-user-stack.pkla
+  stat: path=/etc/polkit-1/localauthority/50-local.d/50-libvirt-user-stack.pkla
+  register: polkit_st
+
+  
+- name: Create the 50-libvirt-user-stack.pkla file
+  template: src=50-libvirt-user-stack.j2 dest=/etc/polkit-1/localauthority/50-local.d/50-libvirt-user-stack.pkla owner=root group=root mode=0755
+  when: not polkit_st.stat.exists

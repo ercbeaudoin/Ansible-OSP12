@@ -1,0 +1,167 @@
+---
+##########################################
+##  
+## Create user stack
+##
+- name: Create stack user with ssh-key
+  user: name=stack state=present generate_ssh_key=yes ssh_key_bits=2048 ssh_key_file=.ssh/id_rsa password={{ undercloud.passwd |password_hash('sha512') }} groups=libvirtd
+  register: create_stack_rc
+
+- name: Add stack user to the sudoers
+  action: 'lineinfile dest=/etc/sudoers.d/stack state=present create=yes regexp="stack .*" line="stack ALL=(ALL) NOPASSWD: ALL"'
+  when: create_stack_rc.changed
+
+- name: Ensure /etc/sudoers.d/stack file has correct permissions
+  action: file path=/etc/sudoers.d/stack mode=0440 state=file owner=root group=root
+
+# Download RHEL image if doesn't exist
+- name: Download RHEL image if the undercloud image is not already created and modified
+  get_url:
+    url: "{{ rhel_guest_url }}"
+    dest: /var/lib/libvirt/images/{{ image_rhel7_orign }}
+    checksum: md5:659bc2bb327c4516629fea39ed9eb97d
+
+######################################
+#
+#  Modifying the undercloud image
+#  1) Remove cloud-init
+#  2) Set root passwword
+#  3) Create eth1 interface
+#  4) Set static IP
+#  5) Create the authority file for root user
+#  6) Add stack user and provide key 
+
+# Verify the undercloud image exist and it has the good size
+- name: Verify if {{ image_path }}{{ undercloud.name }}.qcow2 exist
+  find: paths="{{ image_path }}" recurse=yes patterns="{{ undercloud.name }}.qcow2" size="{{ undercloud.image_size }}"
+  register: image_to_create
+
+- name: Resize undercloud image (create target image)
+  command: >
+    qemu-img create -f qcow2 -o preallocation=off {{ undercloud.name }}.qcow2
+    '{{ undercloud.disk.size }}G'
+  args:
+    chdir: "{{ image_path }}"
+  when: not image_to_create.matched
+
+- name: Resize undercloud image (call virt-resize)
+  command: virt-resize --expand /dev/sda1 {{ image_rhel7_orign }} {{ undercloud.name }}.qcow2
+  args:
+    chdir: "{{ image_path }}"
+  when: not image_to_create.matched
+
+# Accelerate the boot process - remove cloud-init
+#- name: Accelerate the boot process - remove cloud-init
+#  command: /usr/bin/virt-customize -a {{ image_path }}{{ hostvars['osp10-undercloud'].undercloud_name }}.qcow2 --run-command 'yum remove cloud-init* -y'
+#  when: not image_to_create.matched
+
+# Set root passwd - Redhat01
+- name: Set root passwd - Redhat01
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --root-password password:Redhat01
+  when: not image_to_create.matched
+
+# Undercloud machine has an interface on our default network, so create an interface config file for eth1:
+- name: Create an interface config file for eth1
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'touch /etc/sysconfig/network-scripts/ifcfg-eth1 && echo "DEVICE=eth1" >> /etc/sysconfig/network-scripts/ifcfg-eth1 && echo "ONBOOT=yes" >> /etc/sysconfig/network-scripts/ifcfg-eth1 && echo "NM_CONTROLLED=no" >> /etc/sysconfig/network-scripts/ifcfg-eth1'
+  when: not image_to_create.matched
+
+# Undercloud machine has a third interface, so create an interface config file for eth2:
+- name: Create an interface config file for eth2
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'touch /etc/sysconfig/network-scripts/ifcfg-eth2 && echo "DEVICE=eth2" >> /etc/sysconfig/network-scripts/ifcfg-eth2 && echo "ONBOOT=yes" >> /etc/sysconfig/network-scripts/ifcfg-eth2 && echo "NM_CONTROLLED=no" >> /etc/sysconfig/network-scripts/ifcfg-eth2'
+  when: not image_to_create.matched
+
+# Disable eth0 interface (provisioning)
+- name: Disable eth0 interface
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'sed -i s/ONBOOT=.*/ONBOOT=no/g /etc/sysconfig/network-scripts/ifcfg-eth0'
+  when: not image_to_create.matched
+
+- name: Set the IP of the eth1 interface
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'echo "IPADDR={{ undercloud.static_default_net.ip }}" >> /etc/sysconfig/network-scripts/ifcfg-eth1 && echo "NETMASK={{ undercloud.static_default_net.ntmk }}" >> /etc/sysconfig/network-scripts/ifcfg-eth1 && echo "GATEWAY={{ undercloud.static_default_net.gtw }}" >> /etc/sysconfig/network-scripts/ifcfg-eth1 && echo "DNS1={{ undercloud.static_default_net.dns1 }}" >> /etc/sysconfig/network-scripts/ifcfg-eth1'
+  when: not image_to_create.matched
+
+- name: Set the IP of the eth2 interface
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'echo "IPADDR={{ undercloud.static_external_net.ip }}" >> /etc/sysconfig/network-scripts/ifcfg-eth2 && echo "NETMASK={{ undercloud.static_external_net.ntmk }}" >> /etc/sysconfig/network-scripts/ifcfg-eth2 && echo "GATEWAY={{ undercloud.static_external_net.gtw }}" >> /etc/sysconfig/network-scripts/ifcfg-eth2 && echo "DNS1={{ undercloud.static_external_net.dns1 }}" >> /etc/sysconfig/network-scripts/ifcfg-eth2'
+  when: not image_to_create.matched
+
+- name: Getting the root public key
+  shell: cat ~/.ssh/id_rsa.pub
+  register: root_pubkey
+
+- name: Create the authority file
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'mkdir /root/.ssh;chmod 700 /root/.ssh;echo "{{ root_pubkey.stdout }}" >> /root/.ssh/authorized_keys;chmod 600 /root/.ssh/authorized_keys;touch /.autorelabel'
+  when: not image_to_create.matched
+
+# Add the stack user to the image
+
+- name: Create the undercloud stack keys path
+  shell: mkdir -p /tmp/{{ undercloud.name }}
+  ignore_errors: yes  
+  when: not image_to_create.matched
+
+- name: Create the undercloud keys
+  shell: cat /dev/zero | ssh-keygen -b 2048 -f /tmp/{{ undercloud.name }}/stackkey -q -N ""
+  ignore_errors: yes
+  when: not image_to_create.matched
+
+- name: get the undercloud priv key
+  shell: cat /tmp/{{ undercloud.name }}/stackkey
+  register: uc_stack_privkey
+  when: not image_to_create.matched
+
+- name: get the undercloud pub key
+  shell: cat /tmp/{{ undercloud.name }}/stackkey.pub
+  register: uc_stack_pubkey
+  when: not image_to_create.matched
+
+- name: Change key files permission
+  shell: chmod 777 -R /tmp/{{ undercloud.name }}/; chown -R stack:stack /tmp/{{ undercloud.name }}
+  when: not image_to_create.matched
+
+- name: get the host server stack pub key
+  shell: cat /home/stack/.ssh/id_rsa.pub
+  register: hs_stack_pubkey
+  when: not image_to_create.matched
+
+- name: Add privte undercloud stack key to host server stack auth key
+  shell: cp /tmp/{{ undercloud.name }}/stackkey.pub /home/stack/.ssh/authorized_keys;chown stack:stack /home/stack/.ssh/authorized_keys; chmod 0600 /home/stack/.ssh/authorized_keys
+  when: not image_to_create.matched
+
+
+- name: Add stack user to the image
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'useradd stack;echo "{{ stack_user.passwd }}"| passwd --stdin stack'
+  when: not image_to_create.matched
+
+- name: Add stack keys to the image
+  command: /usr/bin/virt-customize -a {{ image_path }}{{ undercloud.name }}.qcow2 --run-command 'mkdir /home/stack/.ssh;chmod 700 /home/stack/.ssh;echo "{{ uc_stack_privkey.stdout }}">/home/stack/.ssh/id_rsa;echo "{{ uc_stack_pubkey.stdout }}">/home/stack/.ssh/id_rsa.pub;echo "{{ root_pubkey.stdout }}" >> /home/stack/.ssh/authorized_keys;chmod 600 -R /home/stack/.ssh/*;echo "{{ hs_stack_pubkey.stdout }}" >> /home/stack/.ssh/authorized_keys;chown stack:stack -R /home/stack/.ssh'
+  when: not image_to_create.matched
+
+#########################################################################
+#
+#  Creating the undercloud VM
+#  Note: "Sleep 4" => Since the undercloud image has "/.autorelabel" file, 
+#                     it's better to pause the deployment 
+#                     
+
+- name: get list of vms
+  virt: command=list_vms
+  register: virt_vms
+
+# Deploy undercloud VM
+- name: Deploy undercloud VM
+  command: /usr/bin/virt-install --ram {{ undercloud.mem }} --vcpus {{ undercloud.cpu }} --os-variant {{ undercloud.os.variant }} --disk path={{ undercloud.disk.path }}/{{ undercloud.name }}.qcow2,device=disk,bus=virtio,format=qcow2 --import --noautoconsole --vnc --hvm --network network:brctlplane --network network:default --network bridge=br0,model=virtio --name {{ undercloud.name }}
+  when: ("osp12-undercloud" not in "{{ virt_vms.list_vms }}")
+
+# Pause the deployment
+- name: Pause the deployment
+  pause: minutes=1
+  when: ("osp12-undercloud" not in "{{ virt_vms.list_vms }}")
+
+######################################
+#
+#  Now let's create the overcloud VMs
+#
+
+- name: Create overcloud VMs 
+  include: create_overcloudVMs.yml
+  with_items: "{{ groups['overcloud'] }}"
+  when: (item not in virt_vms.list_vms)

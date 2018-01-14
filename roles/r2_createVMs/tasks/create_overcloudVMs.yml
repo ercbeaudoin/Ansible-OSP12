@@ -1,0 +1,14 @@
+---
+- name: Creating the overcloud images disk
+  command: qemu-img create -f qcow2 -o preallocation=metadata {{ hostvars[item].disk_path }}/{{ item }}.qcow2 {{ hostvars[item].disk_size }}G
+
+- name: test deploy
+  template:
+    src: createovercloudxml.j2
+    dest: /tmp/{{ item }}.sh
+    mode: 0755
+
+- name: Run the deploy script
+  shell: /bin/bash /tmp/{{ item }}.sh
+
+

@@ -1,0 +1,4 @@
+#name: compute-{{ extra_name }}1
+net:
+  mac: 52:54:20:20:89:21 
+  #testval: 20
